@@ -1,9 +1,35 @@
 #!/bin/bash
 
+# find project folder
 base_dir="$(dirname "$(realpath "$0")")/.."
-log_dir="${base_dir}/logs"
-mkdir -p "$log_dir"
 
-timestamp="$(date +"%Y-%m-%d-%H-%M-%S")"
-top -bn1 > "${log_dir}/top_${timestamp}.txt"
+# time for logs
+timestamp="$(date +"%Y-%m-%d %H:%M:%S")"
+
+# log files
+cpu_log="$base_dir/logs/cpu.log"
+mem_log="$base_dir/logs/memory.log"
+disk_log="$base_dir/logs/disk.log"
+net_log="$base_dir/logs/network.log"
+
+# CPU usage (user + system)
+cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}')
+echo "$timestamp CPU: $cpu_usage%" >> "$cpu_log"
+
+# memory usage %
+mem_usage=$(free | awk '/Mem:/ {printf("%.2f", $3/$2 * 100)}')
+echo "$timestamp MEM: $mem_usage%" >> "$mem_log"
+
+# disk usage for /
+disk_usage=$(df -h / | awk 'NR==2 {print $5}')
+echo "$timestamp DISK: $disk_usage" >> "$disk_log"
+
+# network interface (first non-lo)
+iface=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -n 1)
+
+# bytes in/out
+rx=$(cat /sys/class/net/$iface/statistics/rx_bytes)
+tx=$(cat /sys/class/net/$iface/statistics/tx_bytes)
+
+echo "$timestamp NET iface:$iface rx:$rx tx:$tx" >> "$net_log"
 

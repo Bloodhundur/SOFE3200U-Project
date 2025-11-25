@@ -2,38 +2,113 @@
 
 echo "Script Started"
 
-base_dir="$(pwd)"
-#cron_job="* * * * * $base_dir/"
+# project root
+base_dir="$(dirname "$(realpath "$0")")"
+monitor_path="${base_dir}/scripts/monitor.sh"
+cron_line="*/1 * * * * $monitor_path"
 
-echo "Cron Has Started"
+echo "Monitor Ready"
 
-while ((1)) do
+start_cron() {
+	# check if cron job already exists
+	crontab -l 2>/dev/null | grep -F "$monitor_path" >/dev/null
+	if [[ $? -eq 0 ]]; then
+		echo "Cron is already running."
+	else
+		# add cron job
+		(crontab -l 2>/dev/null; echo "$cron_line") | crontab -
+		echo "Cron started (runs every 1m)."
+	fi
+}
+
+stop_cron() {
+	# remove the cron job
+	crontab -l 2>/dev/null | grep -v "$monitor_path" | crontab -
+	echo "Cron stopped."
+}
+
+while ((1)); do
 	read -p "Enter Command (h for help): " cmd
-	
+
 	case "$cmd" in
 		h)
-			echo "e to exit"
-			echo "c to collect"
-			echo "p to print newest log"
-			echo "delete logs"
+			echo "Commands:"
+			echo "e = exit"
+			echo "c = collect once"
+			echo "p = print logs"
+			echo "d = delete logs"
+			echo "cl = clear screen"
+			echo "sc = start cron"
+			echo "xc = stop cron"
 			;;
+
 		e)
-			echo "exiting"
-			exit 1
+			stop_cron        # auto-stop cron when exiting
+			echo "Exiting..."
+			exit 0
 			;;
+
 		c)
-			echo "collecting logs"
-			"${base_dir}/scripts/monitor.sh"
+			"$monitor_path"
 			;;
+
+		sc)
+			start_cron
+			;;
+
+		xc)
+			stop_cron
+			;;
+
 		p)
-			cat "$(ls -t ${base_dir}/logs/*.txt | head -n 1)"
+			echo "Which log?"
+			echo "1) CPU"
+			echo "2) Memory"
+			echo "3) Disk"
+			echo "4) Network"
+			echo "5) All"
+			read -p "> " choice
+
+			case "$choice" in
+				1) cat "${base_dir}/logs/cpu.log" ;;
+				2) cat "${base_dir}/logs/memory.log" ;;
+				3) cat "${base_dir}/logs/disk.log" ;;
+				4) cat "${base_dir}/logs/network.log" ;;
+				5)
+					echo "--- CPU ---"
+					cat "${base_dir}/logs/cpu.log"
+					echo
+					echo "--- MEMORY ---"
+					cat "${base_dir}/logs/memory.log"
+					echo
+					echo "--- DISK ---"
+					cat "${base_dir}/logs/disk.log"
+					echo
+					echo "--- NETWORK ---"
+					cat "${base_dir}/logs/network.log"
+					;;
+				*)
+					echo "Invalid"
+					;;
+			esac
 			;;
+
 		d)
-			echo "delete logs"
+			echo "Clearing logs..."
+			: > "${base_dir}/logs/cpu.log"
+			: > "${base_dir}/logs/memory.log"
+			: > "${base_dir}/logs/disk.log"
+			: > "${base_dir}/logs/network.log"
+			echo "Logs cleared."
 			;;
+		cl)
+			clear
+			;;
+
 		*)
-		echo "Invaild Command"
-		;;
+			echo "Invalid Command"
+			;;
 	esac
 
 done
+
