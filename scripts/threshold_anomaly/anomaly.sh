@@ -21,6 +21,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONFIG_FILE="$PROJECT_ROOT/scripts/threshold_anomaly/config.conf"
 UTILS_FILE="$PROJECT_ROOT/scripts/threshold_anomaly/utils.sh"
 
+#INCORPORATE alert.sh
+ALERT_SCRIPT="$PROJECT_ROOT/scripts/alert.sh"
+
 if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "[ERROR] Config file not found: $CONFIG_FILE"
     exit 2
@@ -92,23 +95,68 @@ if (( count < 2 )); then
     exit 2
 fi
 
+
+#Fix with new script-------------------------------------------------------------
 # ----- Compute mean using awk -----
-mean=$(printf '%s\n' "$values" | awk '{sum+=$1} END {if (NR>0) print sum/NR; else print 0}')
+#mean=$(printf '%s\n' "$values" | awk '{sum+=$1} END {if (NR>0) print sum/NR; else print 0}')
 
 # ----- Compute standard deviation -----
-std=$(printf '%s\n' "$values" | awk -v m="$mean" '
-{
-    sum += ($1 - m) * ($1 - m)
-}
-END {
-    if (NR>0) print sqrt(sum/NR); else print 0
-}')
+#std=$(printf '%s\n' "$values" | awk -v m="$mean" '
+#{
+   # sum += ($1 - m) * ($1 - m)
+#}
+#END {
+   # if (NR>0) print sqrt(sum/NR); else print 0
+#}')
 
-current=$(printf '%s\n' "$values" | tail -n 1)
+#current=$(printf '%s\n' "$values" | tail -n 1)
+#--------------------------------------------------------------------------------
+
+
+
+
+
+
+
+#Fixed logic--------------------------------------------------------
+
+# Split values into:
+# 	- historical_values (all but last)
+# 	- current_value (last value)
+
+historical_values="$(printf '%s\n' "$values" | head -n -1)"
+current="$(printf '%s\n' "$values" | tail -n 1)"
+
+#Recalculate count using only hisotorical values
+hist_count=$(printf '%s\n' "$historical_values" | wc -l)
+
+if (( hist_count < 2 )); then
+	echo "[ERROR] Not enough historical data points for anomaly detection (need >=2, have $hist_count)"
+	exit 2
+fi
+
+
+# ------Compute mean (historical only)----------
+mean=$(printf '%s\n' "$historical_values" |
+	awk '{sum+=$1} END {print sum/NR}')
+
+
+# ------Compute standard deviation (historical only)-------
+std=$(printf '%s\n' "$historical_values" |
+	awk -v m="$mean" '{
+		sum += ($1 - m)^2
+	} END {
+		print sqrt(sum/NR)
+	}')
+
+
+
+
 
 # If std dev is zero, no variation → no anomaly
 if (( $(echo "$std == 0" | bc -l) )); then
     echo "[OK] $LABEL: current=$current, mean=$mean, std=0 (no variation, no anomaly)"
+
     exit 0
 fi
 
@@ -117,7 +165,20 @@ upper=$(echo "$mean + ($STD_DEV_FACTOR * $std)" | bc -l)
 echo "[INFO] $LABEL: current=$current, mean=$mean, std=$std, upper_limit=$upper"
 
 if (( $(echo "$current > $upper" | bc -l) )); then
-    echo "[ANOMALY] $LABEL: $current > mean + $STD_DEV_FACTOR * std ($upper)"
+    message="[ANOMALY] $LABEL: $current > mean + $STD_DEV_FACTOR * std ($upper)"
+    echo "$message"
+
+    #send notification using alert.sh through email and slack
+    #---------------------------------------------------------
+    if [[ -f "$ALERT_SCRIPT" ]]; then
+	    bash "$ALERT_SCRIPT" "$message"
+
+    else
+	    echo "[ERROR] alert.sh not found at $ALERT_SCRIPT"
+
+    fi
+    #---------------------------------------------------------
+
     exit 1
 else
     echo "[OK] No anomaly detected for $LABEL."
