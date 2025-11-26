@@ -33,3 +33,12 @@ tx=$(cat /sys/class/net/$iface/statistics/tx_bytes)
 
 echo "$timestamp NET iface:$iface rx:$rx tx:$tx" >> "$net_log"
 
+#--------------------------------------------------------------------------
+
+# After logging metrics, run anomaly detection
+$base_dir/scripts/threshold_anomaly/anomaly.sh cpu
+$base_dir/scripts/threshold_anomaly/anomaly.sh mem
+$base_dir/scripts/threshold_anomaly/anomaly.sh disk
+$base_dir/scripts/threshold_anomaly/anomaly.sh net
+
+

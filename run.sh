@@ -37,6 +37,7 @@ while ((1)); do
 			echo "c = collect once"
 			echo "p = print logs"
 			echo "d = delete logs"
+			echo "a = check logs for anomalies"
 			echo "cl = clear screen"
 			echo "sc = start cron"
 			echo "xc = stop cron"
@@ -51,6 +52,32 @@ while ((1)); do
 		c)
 			"$monitor_path"
 			;;
+
+
+
+
+
+
+		a)
+			echo "Run anomaly detection on which metric (enter number only)"
+			echo "1) CPU"
+			echo "2) Memory"
+			echo "3) Disk"
+			echo "4) Network"
+			read -p "> " choice
+
+			case "$choice" in
+				1) $base_di/scripts/threshold_anomaly/anomaly.sh cpu ;;
+				2) $base_di/scripts/threshold_anomaly/anomaly.sh mem ;;
+				3) $base_di/scripts/threshold_anomaly/anomaly.sh disk ;;
+				4) $base_di/scripts/threshold_anomaly/anomaly.sh net ;;
+
+				*)
+					echo "Invalid"
+					;;
+			esac
+			;;
+
 
 		sc)
 			start_cron
