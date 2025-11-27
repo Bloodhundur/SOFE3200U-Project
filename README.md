@@ -34,3 +34,8 @@ Open /etc/postfix/main.cf and set key parameters:
 
 `sudo systemctl status postfix`
 
+----------------------------------------------------------
+
+To run, go to project root directory and enter this command:
+
+`./run.sh`
