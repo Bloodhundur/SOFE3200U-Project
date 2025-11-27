@@ -20,17 +20,16 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 CONFIG_FILE="$PROJECT_ROOT/scripts/threshold_anomaly/config.conf"
 UTILS_FILE="$PROJECT_ROOT/scripts/threshold_anomaly/utils.sh"
-
-#INCORPORATE alert.sh
 ALERT_SCRIPT="$PROJECT_ROOT/scripts/alert.sh"
 
+# Load config and utils
 if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo "[ERROR] Config file not found: $CONFIG_FILE"
+    echo "[ERROR] Config file not found: $CONFIG_FILE" >&2
     exit 2
 fi
 
 if [[ ! -f "$UTILS_FILE" ]]; then
-    echo "[ERROR] Utils file not found: $UTILS_FILE"
+    echo "[ERROR] Utils file not found: $UTILS_FILE" >&2
     exit 2
 fi
 
@@ -73,90 +72,63 @@ case "$arg" in
 esac
 
 if [[ ! -f "$LOG_FILE" ]]; then
-    echo "[ERROR] Metric log file not found: $LOG_FILE"
+    echo "[ERROR] Metric log file not found: $LOG_FILE" >&2
     exit 2
 fi
 
-# Take last WINDOW_SIZE samples (value = last column)
-values_raw="$(tail -n "$WINDOW_SIZE" "$LOG_FILE" | awk '{print $NF}')"
+WINDOW_SIZE="${WINDOW_SIZE:-10}"
 
-# Filter numeric lines only (if is_numeric available, could use it;
-# here we use grep -E which is standard on Linux)
-values="$(printf '%s\n' "$values_raw" | grep -E '^[0-9]+(\.[0-9]+)?$' || true)"
+# --------------------------------------------------------------------
+# Extract numeric values from the last WINDOW_SIZE lines of the log.
+# We DON'T trust the last column because lines look like:
+#   "CPU: 0%"
+#   "DISK: 26%"
+#   "NET iface:enp0s3 rx:... tx:1275615"
+# Instead, we grab ALL numbers from those lines and then keep only
+# the last WINDOW_SIZE numeric values.
+# --------------------------------------------------------------------
+numeric_values="$(
+    tail -n "$WINDOW_SIZE" "$LOG_FILE" | grep -Eo '[0-9]+(\.[0-9]+)?'
+)"
 
-if [[ -z "$values" ]]; then
-    echo "[ERROR] No numeric data available in $LOG_FILE"
-    exit 2
-fi
+# Clean out empty lines
+numeric_values="$(printf '%s\n' "$numeric_values" | sed '/^$/d')"
+count=$(printf '%s\n' "$numeric_values" | wc -l)
 
-count=$(printf '%s\n' "$values" | wc -l)
 if (( count < 2 )); then
-    echo "[ERROR] Not enough data points for anomaly detection (need >= 2, have $count)"
+    echo "[ERROR] Not enough numeric data points in $LOG_FILE for anomaly detection (have $count, need >= 2)" >&2
     exit 2
 fi
 
-
-#Fix with new script-------------------------------------------------------------
-# ----- Compute mean using awk -----
-#mean=$(printf '%s\n' "$values" | awk '{sum+=$1} END {if (NR>0) print sum/NR; else print 0}')
-
-# ----- Compute standard deviation -----
-#std=$(printf '%s\n' "$values" | awk -v m="$mean" '
-#{
-   # sum += ($1 - m) * ($1 - m)
-#}
-#END {
-   # if (NR>0) print sqrt(sum/NR); else print 0
-#}')
-
-#current=$(printf '%s\n' "$values" | tail -n 1)
-#--------------------------------------------------------------------------------
-
-
-
-
-
-
-
-#Fixed logic--------------------------------------------------------
-
-# Split values into:
-# 	- historical_values (all but last)
-# 	- current_value (last value)
-
-historical_values="$(printf '%s\n' "$values" | head -n -1)"
-current="$(printf '%s\n' "$values" | tail -n 1)"
-
-#Recalculate count using only hisotorical values
-hist_count=$(printf '%s\n' "$historical_values" | wc -l)
-
-if (( hist_count < 2 )); then
-	echo "[ERROR] Not enough historical data points for anomaly detection (need >=2, have $hist_count)"
-	exit 2
+# If there are more numeric tokens than WINDOW_SIZE, take only the last WINDOW_SIZE
+if (( count > WINDOW_SIZE )); then
+    numeric_values="$(printf '%s\n' "$numeric_values" | tail -n "$WINDOW_SIZE")"
+    count="$WINDOW_SIZE"
 fi
 
+# Split into historical (all but last) and current (last)
+current="$(printf '%s\n' "$numeric_values" | tail -n 1)"
+historical="$(printf '%s\n' "$numeric_values" | head -n $((count - 1)))"
 
-# ------Compute mean (historical only)----------
-mean=$(printf '%s\n' "$historical_values" |
-	awk '{sum+=$1} END {print sum/NR}')
+hist_count=$(printf '%s\n' "$historical" | wc -l)
+if (( hist_count < 1 )); then
+    echo "[ERROR] Not enough historical data points for anomaly detection (have $hist_count)" >&2
+    exit 2
+fi
 
+# ------ Compute mean (historical only) ------
+mean=$(printf '%s\n' "$historical" | awk '{sum+=$1} END {if (NR>0) print sum/NR; else print 0}')
 
-# ------Compute standard deviation (historical only)-------
-std=$(printf '%s\n' "$historical_values" |
-	awk -v m="$mean" '{
-		sum += ($1 - m)^2
-	} END {
-		print sqrt(sum/NR)
-	}')
-
-
-
-
+# ------ Compute standard deviation (historical only) ------
+std=$(printf '%s\n' "$historical" | awk -v m="$mean" '{
+    sum += ($1 - m)^2
+} END {
+    if (NR>0) print sqrt(sum/NR); else print 0
+}')
 
 # If std dev is zero, no variation → no anomaly
 if (( $(echo "$std == 0" | bc -l) )); then
     echo "[OK] $LABEL: current=$current, mean=$mean, std=0 (no variation, no anomaly)"
-
     exit 0
 fi
 
@@ -168,16 +140,12 @@ if (( $(echo "$current > $upper" | bc -l) )); then
     message="[ANOMALY] $LABEL: $current > mean + $STD_DEV_FACTOR * std ($upper)"
     echo "$message"
 
-    #send notification using alert.sh through email and slack
-    #---------------------------------------------------------
+    # send notification using alert.sh through email and slack
     if [[ -f "$ALERT_SCRIPT" ]]; then
-	    bash "$ALERT_SCRIPT" "$message"
-
+        bash "$ALERT_SCRIPT" "$message"
     else
-	    echo "[ERROR] alert.sh not found at $ALERT_SCRIPT"
-
+        echo "[ERROR] alert.sh not found at $ALERT_SCRIPT"
     fi
-    #---------------------------------------------------------
 
     exit 1
 else
