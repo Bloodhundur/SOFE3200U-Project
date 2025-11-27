@@ -22,7 +22,8 @@ CONFIG_FILE="$PROJECT_ROOT/scripts/threshold_anomaly/config.conf"
 UTILS_FILE="$PROJECT_ROOT/scripts/threshold_anomaly/utils.sh"
 ALERT_SCRIPT="$PROJECT_ROOT/scripts/alert.sh"
 
-# Load config and utils
+# --- Load config and utils ----------------------------------------------------
+
 if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "[ERROR] Config file not found: $CONFIG_FILE" >&2
     exit 2
@@ -37,6 +38,11 @@ fi
 source "$CONFIG_FILE"
 # shellcheck disable=SC1090
 source "$UTILS_FILE"
+
+WINDOW_SIZE="${WINDOW_SIZE:-10}"
+STD_DEV_FACTOR="${STD_DEV_FACTOR:-2}"
+
+# --- Argument parsing ---------------------------------------------------------
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 {cpu|mem|disk|net|/path/to/log}" >&2
@@ -76,22 +82,23 @@ if [[ ! -f "$LOG_FILE" ]]; then
     exit 2
 fi
 
-WINDOW_SIZE="${WINDOW_SIZE:-10}"
+if [[ ! -s "$LOG_FILE" ]]; then
+    echo "[ERROR] Metric log file is empty: $LOG_FILE" >&2
+    exit 2
+fi
 
-# --------------------------------------------------------------------
-# Extract numeric values from the last WINDOW_SIZE lines of the log.
-# We DON'T trust the last column because lines look like:
+# --- Extract numeric values ---------------------------------------------------
+# We don't trust just the last column because lines look like:
 #   "CPU: 0%"
 #   "DISK: 26%"
 #   "NET iface:enp0s3 rx:... tx:1275615"
-# Instead, we grab ALL numbers from those lines and then keep only
-# the last WINDOW_SIZE numeric values.
-# --------------------------------------------------------------------
+# So we grab ALL numbers from the last WINDOW_SIZE lines and then
+# keep only the last WINDOW_SIZE numeric tokens.
+
 numeric_values="$(
     tail -n "$WINDOW_SIZE" "$LOG_FILE" | grep -Eo '[0-9]+(\.[0-9]+)?'
 )"
 
-# Clean out empty lines
 numeric_values="$(printf '%s\n' "$numeric_values" | sed '/^$/d')"
 count=$(printf '%s\n' "$numeric_values" | wc -l)
 
@@ -100,7 +107,7 @@ if (( count < 2 )); then
     exit 2
 fi
 
-# If there are more numeric tokens than WINDOW_SIZE, take only the last WINDOW_SIZE
+# If there are more numeric tokens than WINDOW_SIZE, keep only the last WINDOW_SIZE
 if (( count > WINDOW_SIZE )); then
     numeric_values="$(printf '%s\n' "$numeric_values" | tail -n "$WINDOW_SIZE")"
     count="$WINDOW_SIZE"
@@ -116,15 +123,17 @@ if (( hist_count < 1 )); then
     exit 2
 fi
 
-# ------ Compute mean (historical only) ------
-mean=$(printf '%s\n' "$historical" | awk '{sum+=$1} END {if (NR>0) print sum/NR; else print 0}')
+# --- Compute mean and std-dev (historical only) -------------------------------
 
-# ------ Compute standard deviation (historical only) ------
-std=$(printf '%s\n' "$historical" | awk -v m="$mean" '{
-    sum += ($1 - m)^2
-} END {
-    if (NR>0) print sqrt(sum/NR); else print 0
-}')
+mean=$(printf '%s\n' "$historical" |
+    awk '{sum+=$1} END { if (NR>0) printf "%.6f", sum/NR; else print 0 }')
+
+std=$(printf '%s\n' "$historical" |
+    awk -v m="$mean" '{
+        sum += ($1 - m)^2
+    } END {
+        if (NR>0) printf "%.6f", sqrt(sum/NR); else print 0
+    }')
 
 # If std dev is zero, no variation → no anomaly
 if (( $(echo "$std == 0" | bc -l) )); then
@@ -132,19 +141,22 @@ if (( $(echo "$std == 0" | bc -l) )); then
     exit 0
 fi
 
-upper=$(echo "$mean + ($STD_DEV_FACTOR * $std)" | bc -l)
+# Compute upper limit using awk (avoids bc syntax errors with huge values)
+upper=$(awk -v m="$mean" -v s="$std" -v f="$STD_DEV_FACTOR" \
+           'BEGIN { printf "%.6f", m + (f * s) }')
 
 echo "[INFO] $LABEL: current=$current, mean=$mean, std=$std, upper_limit=$upper"
 
+# --- Anomaly decision & alert -------------------------------------------------
+
 if (( $(echo "$current > $upper" | bc -l) )); then
-    message="[ANOMALY] $LABEL: $current > mean + $STD_DEV_FACTOR * std ($upper)"
+    message="[ANOMALY] $LABEL: current=$current > upper_limit=$upper (mean=$mean, std=$std, window=$WINDOW_SIZE)"
     echo "$message"
 
-    # send notification using alert.sh through email and slack
-    if [[ -f "$ALERT_SCRIPT" ]]; then
+    if [[ -x "$ALERT_SCRIPT" ]]; then
         bash "$ALERT_SCRIPT" "$message"
     else
-        echo "[ERROR] alert.sh not found at $ALERT_SCRIPT"
+        echo "[WARN] alert.sh not found or not executable at $ALERT_SCRIPT"
     fi
 
     exit 1
