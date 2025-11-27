@@ -71,6 +71,7 @@ fi
 if [[ -n "$down_message" ]]; then
 	message="$timestamp Services issue: $down_message"
 	echo "$message" >> "$services_log"
+	echo "$message"
 	
 	#send notification through alert.sh
 	if [[ -f "$base_dir/scripts/alert.sh" ]]; then
