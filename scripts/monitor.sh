@@ -15,7 +15,7 @@ mem_log="$base_dir/logs/memory.log"
 disk_log="$base_dir/logs/disk.log"
 net_log="$base_dir/logs/network.log"
 services_log="$base_dir/logs/services.log"
-app_log="$base_dir/logs/app_errors.log"   # NEW: application/system log monitoring
+app_log="$base_dir/logs/app_errors.log"   # application/system log monitoring
 
 # ---------------- CPU ----------------
 # CPU usage (user + system)
@@ -42,7 +42,7 @@ tx=$(cat /sys/class/net/$iface/statistics/tx_bytes)
 
 echo "$timestamp NET iface:$iface rx:$rx tx:$tx" >> "$net_log"
 
-# ---Service Monitoring---
+# --- Service Monitoring ---
 
 down_message=""
 
@@ -81,13 +81,24 @@ if [[ -n "$down_message" ]]; then
     fi
 fi
 
-# --- Application / System Log Monitoring (NEW) ---
-# Grab recent error-like lines from /var/log/syslog and append to app_errors.log
+# --- Application / System Log Monitoring (Option 3) ---
+
+# 1) System / application errors from /var/log/syslog
 if [[ -f /var/log/syslog ]]; then
     {
         echo
-        echo "===== $timestamp - Recent application/system errors from /var/log/syslog ====="
-        grep -iE "error|failed|failure|warning" /var/log/syslog | tail -n 20
+        echo "===== $timestamp - Recent system/application errors from /var/log/syslog ====="
+        # focus on more serious issues (noisy warnings reduced)
+        grep -iE "error|critical|failed|failure" /var/log/syslog | tail -n 20
+    } >> "$app_log"
+fi
+
+# 2) Authentication/login failures from /var/log/auth.log
+if [[ -f /var/log/auth.log ]]; then
+    {
+        echo
+        echo "===== $timestamp - Recent auth failures from /var/log/auth.log ====="
+        grep -iE "failed password|authentication failure|invalid user" /var/log/auth.log | tail -n 10
     } >> "$app_log"
 fi
 
