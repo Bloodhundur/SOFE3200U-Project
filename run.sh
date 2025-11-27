@@ -88,6 +88,7 @@ while ((1)); do
             echo "3) Disk"
             echo "4) Network"
             echo "5) All"
+            echo "6) Application errors (syslog)"
             read -p "> " choice
 
             case "$choice" in
@@ -108,6 +109,10 @@ while ((1)); do
                     echo "--- NETWORK ---"
                     cat "${base_dir}/logs/network.log"
                     ;;
+                6)
+                    echo "--- APPLICATION / SYSTEM ERRORS (from /var/log/syslog) ---"
+                    cat "${base_dir}/logs/app_errors.log"
+                    ;;
                 *)
                     echo "Invalid"
                     ;;
@@ -120,6 +125,7 @@ while ((1)); do
             : > "${base_dir}/logs/memory.log"
             : > "${base_dir}/logs/disk.log"
             : > "${base_dir}/logs/network.log"
+            : > "${base_dir}/logs/app_errors.log"
             echo "Logs cleared."
             ;;
 
