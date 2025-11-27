@@ -12,6 +12,9 @@ mem_log="$base_dir/logs/memory.log"
 disk_log="$base_dir/logs/disk.log"
 net_log="$base_dir/logs/network.log"
 
+services_log="$base_dir/logs/services.log"
+
+
 # CPU usage (user + system)
 cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}')
 echo "$timestamp CPU: $cpu_usage%" >> "$cpu_log"
@@ -32,6 +35,52 @@ rx=$(cat /sys/class/net/$iface/statistics/rx_bytes)
 tx=$(cat /sys/class/net/$iface/statistics/tx_bytes)
 
 echo "$timestamp NET iface:$iface rx:$rx tx:$tx" >> "$net_log"
+
+
+
+
+
+# ---Service Monitoring---
+
+down_message=""
+
+#Apache check
+if systemctl is-active --quiet apache2; then
+	echo "$timstamp Apache: running" >> "$services_log"
+else
+	down_message+="Apache DOWN; "
+fi
+
+#MySQL check
+if systemctl is-active --quiet mysql; then
+	echo "$timestamp MySQL: running" >> "$services_log"
+else
+	down_message+="MySQL DOWN; "
+fi
+
+#Nginx check
+if systemctl is-active --quiet nginx; then
+	echo "$timestamp Nginx: running" >> "$services_log"
+else
+	down_message+="Nginx DOWN; "
+fi
+
+
+
+#If any service was down, log one combined message and send alert
+if [[ -n "$down_message" ]]; then
+	message="$timestamp Services issue: $down_message"
+	echo "$message" >> "$services_log"
+	
+	#send notification through alert.sh
+	if [[ -f "$base_dir/scripts/alert.sh" ]]; then
+		bash "$base_dir/scripts/alert.sh" "$message"
+	else
+		echo "[ERROR] alert.sh not found at $base_dir/scripts/alert.sh"
+	fi
+fi
+
+
 
 #--------------------------------------------------------------------------
 
