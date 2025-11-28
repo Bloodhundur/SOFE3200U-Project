@@ -68,7 +68,7 @@ case "$arg" in
         ;;
     net|network)
         LOG_FILE="$PROJECT_ROOT/$NET_LOG"
-        LABEL="Network usage (KB/s)"
+        LABEL="Network usage (B/s)"
         ;;
     *)
         # Treat as custom log path (absolute or relative)
